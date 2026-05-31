@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "config-lib",
+  "version": "${version}",
+  "name": "Config Lib",
+  "description": "A simple config library for Minecraft Fabric mods",
+  "authors": [],
+  "contact": {},
+  "license": "LGPL-3.0-only",
+  "icon": "assets/icon.png",
+  "environment": "server",
+  "entrypoints": {},
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "^${minecraft_version}"
+  },
+  "custom": {
+    "mc-publish": {
+      "modrinth": {
+        "project_id": "---",
+        "loaders": [
+          "fabric"
+        ]
+      }
+    }
+  }
+}

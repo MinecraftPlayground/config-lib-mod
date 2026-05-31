@@ -1,0 +1,60 @@
+name: 'Build Mod'
+
+env:
+  ARTIFACT_NAME: 'config_lib'
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+  push:
+    paths:
+      - 'build.gradle'
+      - 'gradle.properties'
+      - 'gradlew'
+      - 'gradlew.bat'
+      - 'settings.gradle'
+      - '.github/workflows/build.yml'
+      - 'gradle/**'
+      - 'src/**'
+  
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: 'Build'
+    steps:
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v5
+          
+      - name: 'Setup JDK'
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 25
+
+      - name: 'Setup Gradle'
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          build-scan-publish: true
+          build-scan-terms-of-use-agree: 'yes'
+          build-scan-terms-of-use-url: 'https://gradle.com/terms-of-service'
+
+      - name: 'Build with Gradle Wrapper'
+        run: |-
+          ./gradlew build --scan
+
+          echo 'Files:'
+          ls -la build/libs/
+
+      - name: 'Upload Artifact'
+        uses: actions/upload-artifact@v7
+        id: save-artifact
+        with:
+          name: '${{ env.ARTIFACT_NAME }}'
+          path: '${{ github.workspace }}/build/libs/*.jar'
