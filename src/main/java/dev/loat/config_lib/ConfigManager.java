@@ -12,104 +12,107 @@ import java.util.Map;
 
 
 /**
- * Central manager for YAML configuration files.
+ * Manages YAML configuration files under a given root directory.
  *
- * <p>Usage</p>
+ * <p>Create one instance per mod (typically as a private static field in a dedicated
+ * {@code Config} class), set the root directory in the constructor, then call
+ * {@link #add} to register config files.</p>
+ *
+ * <h2>Minimal setup</h2>
  * <pre>{@code
- * public class MyMod implements ModInitializer {
+ * public final class Config {
+ *     private Config() {}
  *
- *     @Override
- *     public void onInitialize() {
- *         // 1. Set the root directory (relative to <game_dir>/config/)
- *         ConfigManager.root("my_mod");
+ *     private static final ConfigManager MANAGER = new ConfigManager("my_mod");
  *
- *         // 2. Register config files
- *         ConfigManager.add("settings.yml", MySettings.class);
- *         ConfigManager.add("messages.yml", MyMessages.class);
+ *     public static void register() {
+ *         MANAGER.add("config.yml", MyConfig.class);
+ *     }
  *
- *         // 3. Read values anywhere
- *         String level = ConfigManager.get(MySettings.class).property;
+ *     public static MyConfig get() {
+ *         return MANAGER.get(MyConfig.class);
  *     }
  * }
  * }</pre>
  *
- * <p>File location</p>
- * <p>All paths are resolved relative to {@code <game_dir>/config/<root>/}.
- * Sub-directories inside the root are supported:</p>
- * <pre><code>
- * ConfigManager.root("my_mod");
- * ConfigManager.add("modules/chat.yml", ChatConfig.class);
- * // <game_dir>/config/my_mod/modules/chat.yml
- * </code></pre>
+ * <p>Call {@code Config.register()} in {@code onInitialize()}. Access values
+ * anywhere via {@code Config.get().myField} — or, for static-field configs,
+ * directly via {@code MyConfig.myField}.</p>
  *
- * <h2>Smart merge</h2>
- * <p>When a config file already exists but the class has gained new fields,
- * the missing keys are added automatically using their default values.
- * Keys that no longer exist in the class are kept in the file and marked
- * with a {@code # @deprecated} comment so the user knows they can be removed.</p>
+ * <h2>Custom logger</h2>
+ * <pre>{@code
+ * private static final ConfigManager MANAGER = new ConfigManager(
+ *     "my_mod",
+ *     LoggerFactory.getLogger(MyMod.class)
+ * );
+ * }</pre>
  *
- * <p>Reload</p>
- * <pre><code>
- * ConfigManager.reloadAll();
- * </code></pre>
+ * <h2>File locations</h2>
+ * <p>All paths are resolved under {@code <game_dir>/config/<root>/}.
+ * Sub-directories are supported:</p>
+ * <pre>{@code
+ * MANAGER.add("modules/chat.yml", ChatConfig.class);
+ * // → <game_dir>/config/my_mod/modules/chat.yml
+ * }</pre>
  */
 public final class ConfigManager {
 
-    private ConfigManager() {}
+    private final String rootDirectory;
+    private final Logger logger;
+    private final Map<Class<?>, ConfigEntry<?>> entries = new LinkedHashMap<>();
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ConfigManager.class);
-
-    private static String rootDirectory = "";
-    private static boolean initialized = false;
-
-    // Keyed by config class for O(1) typed get()
-    private static final Map<Class<?>, ConfigEntry<?>> entries = new LinkedHashMap<>();
+    // -------------------------------------------------------------------------
+    // Constructors
+    // -------------------------------------------------------------------------
 
     /**
-     * Sets the root directory for all config files.
+     * Creates a new manager with a default SLF4J logger.
      *
-     * <p>Must be called before any config is first accessed (typically at the
-     * top of {@code onInitialize()}). Calling {@code root()} triggers loading of
-     * all configs registered via {@link #add} before this call.</p>
-     *
-     * @param root Subdirectory under {@code <game_dir>/config/} (e.g. {@code "my_mod"})
+     * @param rootDirectory Subdirectory under {@code <game_dir>/config/}
+     *                      (e.g. {@code "my_mod"} → {@code config/my_mod/})
      */
-    public static void root(String root) {
-        rootDirectory = root;
-        initialized = true;
-
-        // Load any entries that were registered before root() was called
-        entries.forEach((clazz, entry) -> {
-            if (!entry.isLoaded()) {
-                entry.load(resolve(entry.relativePath));
-            }
-        });
+    public ConfigManager(String rootDirectory) {
+        this(rootDirectory, LoggerFactory.getLogger(ConfigManager.class));
     }
 
     /**
-     * Registers a config file and loads it from disk (or creates it with defaults).
+     * Creates a new manager with a custom logger.
      *
-     * <p>If {@link #root} has not been called yet the entry is queued and loaded
-     * once {@link #root} is invoked.</p>
+     * @param rootDirectory Subdirectory under {@code <game_dir>/config/}
+     * @param logger        The logger to use for info, warning, and error messages
+     */
+    public ConfigManager(String rootDirectory, Logger logger) {
+        this.rootDirectory = rootDirectory;
+        this.logger = logger;
+    }
+
+    // -------------------------------------------------------------------------
+    // Registration
+    // -------------------------------------------------------------------------
+
+    /**
+     * Registers a config file and loads it immediately.
      *
-     * @param relativePath Path relative to the root directory (e.g. {@code "settings.yml"})
-     * @param configClass The config class — must have a public no-arg constructor
-     * @param <ConfigFile> The config type
+     * <p>If the file does not exist it is created with default values derived
+     * from the config class. If it exists but is missing keys, those keys are
+     * added with their default values and the file is rewritten.</p>
+     *
+     * @param relativePath Path relative to the root directory (e.g. {@code "config.yml"})
+     * @param configClass  The config class — must have a no-arg constructor
+     *                     (may be private for static-field configs)
+     * @param <T>          The config type
      * @throws IllegalArgumentException if {@code configClass} is already registered
      */
-    public static <ConfigFile> void add(String relativePath, Class<ConfigFile> configClass) {
+    public <T> void add(String relativePath, Class<T> configClass) {
         if (entries.containsKey(configClass)) {
             throw new IllegalArgumentException(
                 "Config class '%s' is already registered.".formatted(configClass.getName())
             );
         }
 
-        ConfigEntry<ConfigFile> entry = new ConfigEntry<>(relativePath, configClass);
+        ConfigEntry<T> entry = new ConfigEntry<>(relativePath, configClass, logger);
         entries.put(configClass, entry);
-
-        if (initialized) {
-            entry.load(resolve(relativePath));
-        }
+        entry.load(resolve(relativePath));
     }
 
     // -------------------------------------------------------------------------
@@ -119,21 +122,24 @@ public final class ConfigManager {
     /**
      * Returns the current config value for the given class.
      *
+     * <p>For static-field configs this returns a dummy instance — access the actual
+     * values via the static fields directly ({@code MyConfig.myField}) or through
+     * the returned reference ({@code manager.get(MyConfig.class).myField}), both work.</p>
+     *
      * @param configClass The class passed to {@link #add}
-     * @param <ConfigFile>         The config type
-     * @return The loaded config instance — never {@code null}
+     * @param <T>         The config type
+     * @return The loaded config instance — {@code null} only if loading failed
      * @throws IllegalStateException if the class was never registered
      */
     @SuppressWarnings("unchecked")
-    public static <ConfigFile> ConfigFile get(Class<ConfigFile> configClass) {
+    public <T> T get(Class<T> configClass) {
         ConfigEntry<?> entry = entries.get(configClass);
         if (entry == null) {
             throw new IllegalStateException(
-                "Config '%s' is not registered. Call ConfigManager.add() before accessing it."
-                    .formatted(configClass.getName())
+                "Config '%s' is not registered. Call add() before get().".formatted(configClass.getName())
             );
         }
-        return (ConfigFile) entry.getValue();
+        return (T) entry.getValue();
     }
 
     // -------------------------------------------------------------------------
@@ -143,16 +149,12 @@ public final class ConfigManager {
     /**
      * Reloads all registered config files from disk.
      *
-     * <p>Values are updated in-place — existing references obtained via
-     * {@link #get} will return the new values on subsequent calls.</p>
+     * <p>For static-field configs the static field values are updated in-place.
+     * For instance configs subsequent {@link #get} calls return the refreshed values.</p>
      */
-    public static void reloadAll() {
-        if (!initialized) {
-            LOGGER.warn("ConfigManager.reloadAll() called before root() — nothing to reload.");
-            return;
-        }
+    public void reloadAll() {
         entries.forEach((clazz, entry) -> {
-            LOGGER.info("Reloading config '{}'.", entry.relativePath);
+            logger.info("Reloading config '{}'.", entry.relativePath);
             entry.load(resolve(entry.relativePath));
         });
     }
@@ -162,13 +164,13 @@ public final class ConfigManager {
     // -------------------------------------------------------------------------
 
     /**
-     * Resolves a relative config path to an absolute {@link Path} under
+     * Resolves a relative path to an absolute {@link Path} under
      * {@code <game_dir>/config/<root>/}, creating intermediate directories as needed.
      *
      * @param relativePath Path relative to the root directory
      * @return The resolved absolute path
      */
-    public static Path resolve(String relativePath) {
+    public Path resolve(String relativePath) {
         Path base = FabricLoader.getInstance()
             .getConfigDir()
             .resolve(rootDirectory);
@@ -176,7 +178,7 @@ public final class ConfigManager {
         try {
             Files.createDirectories(base);
         } catch (IOException e) {
-            LOGGER.error("Failed to create config directory '{}': {}", base, e.getMessage());
+            logger.error("Failed to create config directory '{}': {}", base, e.getMessage());
         }
 
         return base.resolve(relativePath);
