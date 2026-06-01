@@ -92,7 +92,9 @@ final class InstanceConfigLoader<ConfigClass> {
             );
         }
 
-        return this.rawMapToObject(mergedMap);
+        Map<String, Object> cleanMap = new LinkedHashMap<>(mergedMap);
+        orphanedKeys.forEach(cleanMap::remove);
+        return rawMapToObject(cleanMap);
     }
 
     /**
@@ -107,8 +109,8 @@ final class InstanceConfigLoader<ConfigClass> {
     @SuppressWarnings("unchecked")
     private Map<String, Object> objectToRawMap(ConfigClass configClass) {
         Yaml dumpYaml = new Yaml(new ComponentRepresenter(this.configClass, YAMLOptions.block()), YAMLOptions.block());
-        String yaml = dumpYaml.dump(configClass);
-        Object loaded = new Yaml(YAMLOptions.plain()).load(yaml);
+        String yamlContent = dumpYaml.dump(configClass);
+        Object loaded = new Yaml(YAMLOptions.plain()).load(yamlContent);
         return loaded instanceof Map<?, ?> map ? (Map<String, Object>) map : new LinkedHashMap<>();
     }
 
