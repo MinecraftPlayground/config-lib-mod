@@ -117,7 +117,7 @@ final class CommentWriter {
                 // Key exists on disk but is no longer in the class
                 result
                     .append(indentStr)
-                    .append("# @deprecated: This key is no longer used and can be removed safely.\n");
+                    .append("# Deprecated: This key is no longer used and can be removed safely.\n");
             } else {
                 // 1. @Annotation.Comment
                 Annotation.Comment comment = field.getAnnotation(Annotation.Comment.class);
@@ -130,14 +130,14 @@ final class CommentWriter {
                     String values = Arrays.stream(field.getType().getEnumConstants())
                         .map(Object::toString)
                         .collect(Collectors.joining(" | "));
-                    CommentWriter.appendCommentBlock(result, "# Possible values: " + values, indentStr);
+                    CommentWriter.appendCommentBlock(result, "Possible values: " + values, indentStr);
                 }
  
                 // 3. # Default: <value> - skipped for nested objects (Map)
                 Object defaultValue = currentDefaults != null ? currentDefaults.get(key) : null;
                 String formatted = CommentWriter.formatDefault(defaultValue);
                 if (formatted != null) {
-                    CommentWriter.appendCommentBlock(result, "# Default: " + formatted, indentStr);
+                    CommentWriter.appendCommentBlock(result, "Default: " + formatted, indentStr);
                 }
  
                 // 4. @Annotation.Deprecated
@@ -212,7 +212,7 @@ final class CommentWriter {
      */
     private static String buildDeprecatedComment(Annotation.Deprecated deprecationAnnotation) {
         if (!deprecationAnnotation.message().isEmpty()) {
-            return "# @deprecated: " + deprecationAnnotation.message();
+            return "# Deprecated: " + deprecationAnnotation.message();
         }
         List<String> parts = new ArrayList<>();
         if (!deprecationAnnotation.migratedTo().isEmpty()) {
@@ -222,8 +222,8 @@ final class CommentWriter {
             parts.add("Will be removed in version " + deprecationAnnotation.removedIn());
         }
         return parts.isEmpty()
-            ? "# @deprecated: This field is deprecated and can be removed."
-            : "# @deprecated: " + String.join(". ", parts) + ".";
+            ? "# Deprecated: This field is deprecated and can be removed."
+            : "# Deprecated: " + String.join(". ", parts) + ".";
     }
 
     /**
