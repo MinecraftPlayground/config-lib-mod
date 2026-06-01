@@ -14,65 +14,42 @@ public final class Annotation {
     private Annotation() {}
 
     /**
-     * Specifies a description for the entire config file. The description is written as a comment at the top of the YAML file when it is created or updated.
-     * 
-     * <p>Example usage:</p>
+     * Adds a comment in the serialized YAML file.
+     *
+     * <p>When placed on a <b>class</b>, the comment is written as a banner at the
+     * very top of the file, before any keys:</p>
      * <pre>{@code
-     * @Annotation.FileDescription("""
-     *     This is the configuration file for MyMod.
-     *     It contains various settings that can be customized by the user.
-     *     Please refer to the documentation for more details.
-     * """)
-     * public class MyConfig {
-     *     // config fields...
-     * }
+     * @Annotation.Comment("Main configuration file for MyMod.")
+     * public class MyConfig { ... }
      * }</pre>
-     * 
-     * <p>Output in YAML:</p>
-     * <pre><code class="language-yaml">
-     * # This is the configuration file for MyMod.
-     * # It contains various settings that can be customized by the user.
-     * # Please refer to the documentation for more details.
-     * ...
-     * </code></pre>
-     */
-    @Retention(RetentionPolicy.RUNTIME)
-    @Target(ElementType.TYPE)
-    public @interface FileDescription {
-        String value();
-    }
-
-    /**
-     * Adds a comment above the annotated field in the serialized YAML file.
-     * The comment is specified as the value of the annotation and can span multiple lines using {@code \n}.
-     * 
-     * <p>Example usage:</p>
+     *
+     * <p>When placed on a <b>field</b>, the comment is written above that key:</p>
      * <pre>{@code
-     * @Annotation.Comment("This is the log level for the application.\nValid values are: DEBUG, INFO, WARN, ERROR.")
-     * public static String logLevel = "INFO";
-     * 
+     * @Annotation.Comment("The log level.\nCan be DEBUG, INFO, WARN or ERROR.")
+     * public String logLevel = "INFO";
+     * }</pre>
+     *
+     * <p>Multi-line comments and relative indentation are preserved:</p>
+     * <pre>{@code
      * @Annotation.Comment("""
-     *     This is a block comment.
-     *     It can span multiple lines.
-     *       And it preserves indentation.
-     * """)
-     * public static String anotherField = "value";
-     * 
+     *     First line.
+     *       Indented sub-line.
+     *     Back to normal.
+     *     """)
+     * public String logLevel = "INFO";
      * }</pre>
-     * 
-     * <p>Output in YAML:</p>
+     *
+     * <p>Output:</p>
      * <pre><code class="language-yaml">
-     * # This is the log level for the application.
-     * # Valid values are: DEBUG, INFO, WARN, ERROR.
+     * # First line.
+     * #   Indented sub-line.
+     * # Back to normal.
+     * # Default: 'INFO'
      * logLevel: INFO
-     * # This is a block comment.
-     * # It can span multiple lines.
-     * #   And it preserves indentation.
-     * anotherField: value
      * </code></pre>
      */
     @Retention(RetentionPolicy.RUNTIME)
-    @Target(ElementType.FIELD)
+    @Target({ElementType.TYPE, ElementType.FIELD})
     public @interface Comment {
         String value();
     }

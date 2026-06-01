@@ -87,7 +87,8 @@ final class InstanceConfigLoader<ConfigClass> {
             CommentWriter.write(
                 this.path,
                 ConfigMerger.buildOrderedMap(mergedMap, orphanedKeys, this.configClass),
-                this.configClass
+                this.configClass,
+                defaultMap
             );
         }
 
@@ -137,7 +138,8 @@ final class InstanceConfigLoader<ConfigClass> {
         CommentWriter.write(
             this.path,
             ConfigMerger.buildOrderedMap(defaultMap, orphanedKeys, this.configClass),
-            this.configClass
+            this.configClass,
+            defaultMap
         );
     }
 

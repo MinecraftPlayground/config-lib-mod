@@ -2,7 +2,7 @@
 
 # Config Lib
 
-A Fabric library for managing YAML configuration files with smart merge support - new fields are added automatically when your config class changes, without overwriting existing user values.
+A Fabric library for managing YAML configuration files with smart merge support — new fields are added automatically when your config class changes, without overwriting existing user values.
 
 ## Installation
 
@@ -34,13 +34,16 @@ And declare the dependency in your `fabric.mod.json`:
 
 A config class is a plain Java class with public instance fields. Default values are written to the file when it is first created.
 
-Use `@Annotation.Comment` to add a description above a field in the YAML output.
-Nested objects are fully supported — annotations on their fields are picked up automatically.
-
 ```java
-import dev.loat.config_lib.annotation.Annotation;
+import dev.loat.yaml_config_lib.annotation.Annotation;
+import java.util.List;
 
+@Annotation.Comment("""
+    Main configuration file for MyMod.
+    Edit values below to customize the mod's behavior.
+    """)
 public class MyConfig {
+    private MyConfig() {}
 
     @Annotation.Comment("The log level.\nCan be DEBUG, INFO, WARN or ERROR.")
     public String logLevel = "INFO";
@@ -48,10 +51,11 @@ public class MyConfig {
     @Annotation.Comment("Maximum number of connections.")
     public int maxConnections = 10;
 
+    @Annotation.Comment("Enabled features.")
+    public List<String> features = List.of("chat", "alerts");
+
     @Annotation.Comment("Database connection settings.")
     public DatabaseConfig database = new DatabaseConfig();
-
-    public boolean featureEnabled = false;
 }
 ```
 
@@ -68,27 +72,37 @@ public class DatabaseConfig {
 
 Output:
 ```yaml
+# Main configuration file for MyMod.
+# Edit values below to customize the mod's behavior.
+
 # The log level.
 # Can be DEBUG, INFO, WARN or ERROR.
+# Default: 'INFO'
 logLevel: INFO
 # Maximum number of connections.
+# Default: 10
 maxConnections: 10
+# Enabled features.
+# Default: ['chat', 'alerts']
+features:
+- chat
+- alerts
 # Database connection settings.
 database:
   # The database host.
+  # Default: 'localhost'
   host: localhost
   # The database port.
+  # Default: 5432
   port: 5432
-featureEnabled: false
 ```
 
 ### 2. Set up the ConfigManager
 
-Create a `ConfigManager` instance with your root directory and register your config files.
-The recommended pattern is a dedicated `Config` class per mod:
+Create a `ConfigManager` instance and wrap it in a dedicated `Config` class:
 
 ```java
-import dev.loat.config_lib.ConfigManager;
+import dev.loat.yaml_config_lib.ConfigManager;
 
 public final class Config {
     private Config() {}
@@ -127,15 +141,11 @@ String host = Config.get().database.host;
 
 ### 4. Reload
 
-To reload all registered config files from disk at runtime (e.g. via a command):
-
 ```java
 MANAGER.reloadAll();
 ```
 
 ### 5. Sub-directories
-
-Sub-directories inside the root are supported:
 
 ```java
 MANAGER.add("modules/chat.yml", ChatConfig.class);
@@ -146,11 +156,9 @@ MANAGER.add("modules/chat.yml", ChatConfig.class);
 
 ## Smart merge
 
-The library automatically keeps config files in sync with your config class.
-
 ### New field added to the class
 
-When a field is added to the class, the missing key is inserted with its default value. All existing values are preserved.
+The missing key is inserted with its default value. All existing values are preserved. The same applies recursively to nested objects.
 
 Before (`config.yml` on disk):
 ```yaml
@@ -158,22 +166,23 @@ logLevel: DEBUG
 maxConnections: 10
 ```
 
-After adding `featureEnabled` to the class and restarting:
+After adding `features` to the class:
 ```yaml
 logLevel: DEBUG
 maxConnections: 10
-featureEnabled: false
+# Enabled features.
+# Default: ['chat', 'alerts']
+features:
+- chat
+- alerts
 ```
-
-The same applies to nested objects — only the missing nested keys are added.
 
 ### Field removed from the class
 
-Keys that no longer exist in the class are kept in the file and marked with a comment so users know they can be removed:
+Orphaned keys are kept at the bottom of the file with an auto-generated comment:
 
 ```yaml
 logLevel: DEBUG
-maxConnections: 10
 # @deprecated: This key is no longer used and can be removed safely.
 oldField: someValue
 ```
@@ -185,29 +194,46 @@ oldField: someValue
 All annotations are accessed via the `Annotation` container class:
 
 ```java
-import dev.loat.config_lib.annotation.Annotation;
+import dev.loat.yaml_config_lib.annotation.Annotation;
 ```
 
 ### `@Annotation.Comment`
 
-Adds a description above the field in the YAML file. Multi-line comments are supported via `\n`.
+Can be placed on a **class** or a **field**.
 
+On a **class** — written as a banner at the very top of the file:
 ```java
-@Annotation.Comment("The log level.\nCan be DEBUG, INFO, WARN or ERROR.")
+@Annotation.Comment("Main configuration file for MyMod.")
+public class MyConfig { ... }
+```
+
+On a **field** — written above that key:
+```java
+@Annotation.Comment("The log level.")
 public String logLevel = "INFO";
 ```
 
+Multi-line comments are supported. Relative indentation within the text is preserved:
+```java
+@Annotation.Comment("""
+    First line.
+      Indented sub-line.
+    Back to normal.
+    """)
+public String logLevel = "INFO";
+```
 Output:
 ```yaml
-# The log level.
-# Can be DEBUG, INFO, WARN or ERROR.
+# First line.
+#   Indented sub-line.
+# Back to normal.
+# Default: 'INFO'
 logLevel: INFO
 ```
 
 ### `@Annotation.Deprecated`
 
-Marks a field as deprecated while keeping it in the class for backwards compatibility.
-A warning comment is written above the field in the YAML file.
+Marks a field as deprecated while keeping it in the class for backwards compatibility:
 
 ```java
 @Annotation.Deprecated(migratedTo = "logLevel", removedIn = "2.0.0")
@@ -232,28 +258,34 @@ logLevel: INFO
 
 ---
 
+## Default values
+
+Every scalar and list field automatically gets a `# Default: <value>` comment line generated from the class-defined default. This is written once when the file is created or updated, so users always know the original value.
+
+| Field type | Format |
+|---|---|
+| `String` | `# Default: 'value'` |
+| `int`, `double`, `boolean`, … | `# Default: 42` |
+| `List<String>` | `# Default: ['a', 'b', 'c']` |
+| Nested object | *(skipped — each nested field has its own line)* |
+
+---
+
 ## Minecraft Component support
 
-Fields of type `net.minecraft.network.chat.Component` are supported out of the box
-and are serialized using Minecraft's own `ComponentSerialization` codec.
+Fields of type `net.minecraft.network.chat.Component` are supported out of the box:
 
 ```java
 @Annotation.Comment("The message shown to players on join.")
 public Component joinMessage = Component.literal("Welcome!");
 ```
 
-Output:
-```yaml
-# The message shown to players on join.
-joinMessage: Welcome!
-```
-
 ---
 
 ## Constraints
 
-- The root config class may have a **private** no-arg constructor.
-- Nested config classes (used as field types) must have a **public** no-arg constructor,
+- The **root config class** may have a private no-arg constructor.
+- **Nested config classes** (used as field types) must have a public no-arg constructor,
   since SnakeYAML needs to instantiate them during deserialization.
 
 ---

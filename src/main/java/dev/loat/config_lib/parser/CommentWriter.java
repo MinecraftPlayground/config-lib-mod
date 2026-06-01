@@ -11,10 +11,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 
 /**
@@ -31,12 +33,18 @@ final class CommentWriter {
      * @param path The file path to write the YAML content to
      * @param orderedMap The map containing the config data to be serialized to YAML
      * @param rootClass The root config class to use for annotation lookup when inserting comments
+     * @param defaultMap The map containing default values for the config fields, used for generating default value comments
      */
-    static void write(Path path, Map<String, Object> orderedMap, Class<?> rootClass) {
+    static void write(
+        Path path,
+        Map<String, Object> orderedMap,
+        Class<?> rootClass,
+        Map<String, Object> defaultMap
+    ) {
         try {
             Files.createDirectories(path.getParent());
             String yaml = new Yaml(YAMLOptions.block()).dump(orderedMap);
-            Files.writeString(path, CommentWriter.insertComments(yaml, rootClass));
+            Files.writeString(path, CommentWriter.insertComments(yaml, rootClass, defaultMap));
         } catch (IOException e) {
             Logger.error("Failed to write config '%s': %s".formatted(path.getFileName(), e.getMessage()));
         }
@@ -53,24 +61,30 @@ final class CommentWriter {
       *
       * @param yamlContent The original YAML content as a string
       * @param rootClass The root config class to use for annotation lookup
+      * @param defaultMap The map containing default values for the config fields
       * 
       * @return A new YAML string with comments inserted.
      */
-    private static String insertComments(String yamlContent, Class<?> rootClass) {
+    @SuppressWarnings("unchecked")
+    private static String insertComments(
+        String yamlContent,
+        Class<?> rootClass,
+        Map<String, Object> defaultMap
+    ) {
         String[] lines = yamlContent.split("\n");
         StringBuilder result = new StringBuilder();
 
-        // Add file description if present
-        Annotation.FileDescription fileDesc = rootClass.getAnnotation(Annotation.FileDescription.class);
-        if (fileDesc != null) {
-            CommentWriter.appendCommentBlock(result, fileDesc.value(), "");
+        // Class-level @Annotation.Comment → file header banner
+        Annotation.Comment classComment = rootClass.getAnnotation(Annotation.Comment.class);
+        if (classComment != null) {
+            appendCommentBlock(result, classComment.value(), "");
             result.append("\n");
         }
 
         // Stack: (class, indentOfParentKey)
         // Root entry uses -1 so that all top-level keys (indent 0) fall inside it.
         Deque<ScopeEntry> stack = new ArrayDeque<>();
-        stack.push(new ScopeEntry(rootClass, -1));
+        stack.push(new ScopeEntry(rootClass, -1, defaultMap));
 
         for (String line : lines) {
             String trimmed = line.stripLeading();
@@ -96,6 +110,7 @@ final class CommentWriter {
             }
 
             Class<?> currentClass = stack.peek().clazz();
+            Map<String, Object> currentDefaults = stack.peek().defaults();
             Field field = CommentWriter.findField(currentClass, key);
 
             if (field == null) {
@@ -104,23 +119,39 @@ final class CommentWriter {
                     .append(indentStr)
                     .append("# @deprecated: This key is no longer used and can be removed safely.\n");
             } else {
+                // 1. @Annotation.Comment
                 Annotation.Comment comment = field.getAnnotation(Annotation.Comment.class);
                 if (comment != null) {
                     CommentWriter.appendCommentBlock(result, comment.value(), indentStr);
                 }
-
+ 
+                // 2. # Possible values: A | B | C - only for enum fields
+                if (field.getType().isEnum()) {
+                    String values = Arrays.stream(field.getType().getEnumConstants())
+                        .map(Object::toString)
+                        .collect(Collectors.joining(" | "));
+                    CommentWriter.appendCommentBlock(result, "# Possible values: " + values, indentStr);
+                }
+ 
+                // 3. # Default: <value> - skipped for nested objects (Map)
+                Object defaultValue = currentDefaults != null ? currentDefaults.get(key) : null;
+                String formatted = CommentWriter.formatDefault(defaultValue);
+                if (formatted != null) {
+                    CommentWriter.appendCommentBlock(result, "# Default: " + formatted, indentStr);
+                }
+ 
+                // 4. @Annotation.Deprecated
                 Annotation.Deprecated dep = field.getAnnotation(Annotation.Deprecated.class);
                 if (dep != null) {
-                    result
-                        .append(indentStr)
-                        .append(CommentWriter.buildDeprecatedComment(dep))
-                        .append("\n");
+                    CommentWriter.appendCommentBlock(result, CommentWriter.buildDeprecatedComment(dep), indentStr);
                 }
-
-                // If the field holds a nested config object, push its type so that
-                // its fields can be annotated at the next indentation level.
+ 
+                // Push nested scope with the nested defaults map
                 if (CommentWriter.isNestedConfigType(field.getType())) {
-                    stack.push(new ScopeEntry(field.getType(), indent));
+                    Map<String, Object> nestedDefaults = defaultValue instanceof Map
+                        ? (Map<String, Object>) defaultValue
+                        : Map.of();
+                    stack.push(new CommentWriter.ScopeEntry(field.getType(), indent, nestedDefaults));
                 }
             }
 
@@ -147,6 +178,27 @@ final class CommentWriter {
                 .append(trimmed.isEmpty() ? "#" : "# " + trimmed)
                 .append("\n");
         }
+    }
+
+    /**
+     * Formats a default value for inclusion in a YAML comment.
+     *
+     * @param value The default value to format
+     * 
+     * @return The formatted string, or {@code null} if the value is null or should be skipped
+     */
+    @SuppressWarnings("unchecked")
+    private static String formatDefault(Object value) {
+        if (value == null) {return null;}
+        if (value instanceof Map) {return null;} // nested object - each field has its own Default line
+        if (value instanceof String s) {return "'%s'".formatted(s);}
+        if (value instanceof List<?> list) {
+            String items = ((List<Object>) list).stream()
+                .map(item -> item instanceof String ? "'%s'".formatted(item) : String.valueOf(item))
+                .collect(Collectors.joining(", "));
+            return "[%s]".formatted(items);
+        }
+        return String.valueOf(value);
     }
 
     /**
@@ -220,6 +272,7 @@ final class CommentWriter {
      *
      * @param clazz The class of the scope entry
      * @param parentIndent The indentation level of the parent scope
+     * @param defaults The map of default values for the fields in this scope
      */
-    private record ScopeEntry(Class<?> clazz, int parentIndent) {}
+    private record ScopeEntry(Class<?> clazz, int parentIndent, Map<String, Object> defaults) {}
 }
