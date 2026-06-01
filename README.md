@@ -2,7 +2,7 @@
 
 # Config Lib
 
-A Fabric library for managing YAML configuration files with smart merge support — new fields are added automatically when your config class changes, without overwriting existing user values.
+A Fabric library for managing YAML configuration files with smart merge support - new fields are added automatically when your config class changes, without overwriting existing user values.
 
 ## Installation
 
@@ -26,62 +26,132 @@ And declare the dependency in your `fabric.mod.json`:
 }
 ```
 
+---
+
 ## Usage
 
-### 1. Define your config class
+### 1. Define your config classes
 
-A config class is a plain Java class with public fields. Default values are written to the file if it does not exist yet.
+A config class is a plain Java class with public instance fields. Default values are written to the file when it is first created.
 
-Use `@Comment` to add a description above a field in the YAML file.
+Use `@Annotation.Comment` to add a description above a field in the YAML output.
+Nested objects are fully supported — annotations on their fields are picked up automatically.
 
 ```java
+import dev.loat.yaml_config_lib.annotation.Annotation;
+
 public class MyConfig {
 
-    @Comment("The log level.\nCan be DEBUG, INFO, WARN or ERROR.")
+    @Annotation.Comment("The log level.\nCan be DEBUG, INFO, WARN or ERROR.")
     public String logLevel = "INFO";
 
-    @Comment("Maximum number of connections.")
+    @Annotation.Comment("Maximum number of connections.")
     public int maxConnections = 10;
+
+    @Annotation.Comment("Database connection settings.")
+    public DatabaseConfig database = new DatabaseConfig();
 
     public boolean featureEnabled = false;
 }
 ```
 
-### 2. Register and load
+```java
+public class DatabaseConfig {
 
-Call `ConfigManager.root()` and `ConfigManager.add()` in `onInitialize()`:
+    @Annotation.Comment("The database host.")
+    public String host = "localhost";
+
+    @Annotation.Comment("The database port.")
+    public int port = 5432;
+}
+```
+
+Output:
+```yaml
+# The log level.
+# Can be DEBUG, INFO, WARN or ERROR.
+logLevel: INFO
+# Maximum number of connections.
+maxConnections: 10
+# Database connection settings.
+database:
+  # The database host.
+  host: localhost
+  # The database port.
+  port: 5432
+featureEnabled: false
+```
+
+### 2. Set up the ConfigManager
+
+Create a `ConfigManager` instance with your root directory and register your config files.
+The recommended pattern is a dedicated `Config` class per mod:
+
+```java
+import dev.loat.yaml_config_lib.ConfigManager;
+
+public final class Config {
+    private Config() {}
+
+    private static final ConfigManager MANAGER = new ConfigManager("my_mod");
+
+    public static void register() {
+        MANAGER.add("config.yml", MyConfig.class);
+    }
+
+    public static MyConfig get() {
+        return MANAGER.get(MyConfig.class);
+    }
+}
+```
+
+Call `Config.register()` in `onInitialize()`:
 
 ```java
 public class MyMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        ConfigManager.root("my_mod");
-        ConfigManager.add("config.yml", MyConfig.class);
+        Config.register();
     }
 }
-```
-
-All config files are resolved relative to `<game_dir>/config/<root>/`. Sub-directories are supported:
-
-```java
-ConfigManager.add("modules/chat.yml", ChatConfig.class);
-// <game_dir>/config/my_mod/modules/chat.yml
 ```
 
 ### 3. Read values
 
 ```java
-String level = ConfigManager.get(MyConfig.class).logLevel;
-int max = ConfigManager.get(MyConfig.class).maxConnections;
+String level = Config.get().logLevel;
+int max = Config.get().maxConnections;
+String host = Config.get().database.host;
 ```
 
-### 4. Reload
+### 4. Custom logger
 
-To reload all config files from disk at runtime (ex. via a command):
+By default the library logs via `LoggerFactory.getLogger(ConfigManager.class)`.
+Pass your own logger to route all config output through your mod's logger:
 
 ```java
-ConfigManager.reloadAll();
+private static final ConfigManager MANAGER = new ConfigManager(
+    "my_mod",
+    LoggerFactory.getLogger(MyMod.class)
+);
+```
+
+### 5. Reload
+
+To reload all registered config files from disk at runtime (e.g. via a command):
+
+```java
+MANAGER.reloadAll();
+```
+
+### 6. Sub-directories
+
+Sub-directories inside the root are supported:
+
+```java
+MANAGER.add("modules/chat.yml", ChatConfig.class);
+// → <game_dir>/config/my_mod/modules/chat.yml
 ```
 
 ---
@@ -92,7 +162,7 @@ The library automatically keeps config files in sync with your config class.
 
 ### New field added to the class
 
-When a field is added to the class, the key is added to the existing file with its default value. All other values are preserved.
+When a field is added to the class, the missing key is inserted with its default value. All existing values are preserved.
 
 Before (`config.yml` on disk):
 ```yaml
@@ -107,9 +177,11 @@ maxConnections: 10
 featureEnabled: false
 ```
 
+The same applies to nested objects — only the missing nested keys are added.
+
 ### Field removed from the class
 
-Keys that no longer exist in the class are kept in the file and marked with a comment so the user knows they can be removed:
+Keys that no longer exist in the class are kept in the file and marked with a comment so users know they can be removed:
 
 ```yaml
 logLevel: DEBUG
@@ -122,12 +194,18 @@ oldField: someValue
 
 ## Annotations
 
-### `@Comment`
-
-Adds a description above the field in the YAML file.
+All annotations are accessed via the `Annotation` container class:
 
 ```java
-@Comment("The log level.\nCan be DEBUG, INFO, WARN or ERROR.")
+import dev.loat.yaml_config_lib.annotation.Annotation;
+```
+
+### `@Annotation.Comment`
+
+Adds a description above the field in the YAML file. Multi-line comments are supported via `\n`.
+
+```java
+@Annotation.Comment("The log level.\nCan be DEBUG, INFO, WARN or ERROR.")
 public String logLevel = "INFO";
 ```
 
@@ -138,12 +216,13 @@ Output:
 logLevel: INFO
 ```
 
-### `@ConfigDeprecated`
+### `@Annotation.Deprecated`
 
-Marks a field as deprecated while keeping it in the class for backwards compatibility. A warning comment is written above the field in the YAML file.
+Marks a field as deprecated while keeping it in the class for backwards compatibility.
+A warning comment is written above the field in the YAML file.
 
 ```java
-@ConfigDeprecated(migratedTo = "logLevel", removedIn = "2.0.0")
+@Annotation.Deprecated(migratedTo = "logLevel", removedIn = "2.0.0")
 public String log_level = "INFO";
 
 public String logLevel = "INFO";
@@ -157,26 +236,22 @@ log_level: INFO
 logLevel: INFO
 ```
 
-All fields of `@ConfigDeprecated`:
-
 | Field | Description |
 |---|---|
 | `migratedTo` | The new key this field was replaced by |
 | `removedIn` | The version in which this field will be removed |
-| `message` | Custom message — overrides `migratedTo` and `removedIn` |
+| `message` | Custom message — if set, `migratedTo` and `removedIn` are ignored |
 
 ---
 
 ## Minecraft Component support
 
-Fields of type `net.minecraft.network.chat.Component` are supported out of the box and are serialized using Minecraft's own `ComponentSerialization` codec.
+Fields of type `net.minecraft.network.chat.Component` are supported out of the box
+and are serialized using Minecraft's own `ComponentSerialization` codec.
 
 ```java
-public class MyConfig {
-
-    @Comment("The message shown to players on join.")
-    public Component joinMessage = Component.literal("Welcome!");
-}
+@Annotation.Comment("The message shown to players on join.")
+public Component joinMessage = Component.literal("Welcome!");
 ```
 
 Output:
@@ -184,6 +259,14 @@ Output:
 # The message shown to players on join.
 joinMessage: Welcome!
 ```
+
+---
+
+## Constraints
+
+- The root config class may have a **private** no-arg constructor.
+- Nested config classes (used as field types) must have a **public** no-arg constructor,
+  since SnakeYAML needs to instantiate them during deserialization.
 
 ---
 

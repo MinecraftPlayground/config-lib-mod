@@ -30,10 +30,23 @@ import org.yaml.snakeyaml.nodes.Tag;
  */
 public class ComponentConstructor extends Constructor {
 
+    /**
+     * Creates a new ComponentConstructor for the given config class and loader options.
+     *
+     * @param configClass The config class being deserialized
+     * @param options The loader options for YAML parsing
+     */
     public ComponentConstructor(Class<?> configClass, LoaderOptions options) {
         super(configClass, options);
     }
 
+    /**
+     * Constructs an object from the given YAML node.
+     *
+     * @param node The YAML node to construct an object from
+     * 
+     * @return The constructed object.
+     */
     @Override
     protected Object constructObject(Node node) {
         if (Component.class.isAssignableFrom(node.getType())
@@ -43,6 +56,13 @@ public class ComponentConstructor extends Constructor {
         return super.constructObject(node);
     }
 
+    /**
+     * Constructs a Minecraft Component from the given YAML node.
+     *
+     * @param node The YAML node to construct a Component from
+     * 
+     * @return The constructed Component.
+     */
     private Component constructComponent(Node node) {
         JsonElement json = nodeToJson(node);
         return ComponentSerialization.CODEC
@@ -51,6 +71,15 @@ public class ComponentConstructor extends Constructor {
             .getFirst();
     }
 
+    /**
+     * Converts a YAML node to a JSON element.
+     *
+     * @param node The YAML node to convert
+     * 
+     * @return The converted JSON element.
+     * 
+     * @throws IllegalArgumentException if the node type is unsupported.
+     */
     private JsonElement nodeToJson(Node node) {
         if (node instanceof ScalarNode scalar) {
             Object value = constructScalar(scalar);

@@ -3,42 +3,71 @@ package dev.loat.config_lib.parser.minecraft;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.mojang.serialization.JsonOps;
+
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.network.chat.MutableComponent;
+
 import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.introspector.Property;
+import org.yaml.snakeyaml.nodes.MappingNode;
 import org.yaml.snakeyaml.nodes.Node;
 import org.yaml.snakeyaml.nodes.Tag;
 import org.yaml.snakeyaml.representer.Representer;
+
+import java.util.Set;
 
 
 /**
  * SnakeYAML representer with Minecraft chat {@link Component} support.
  *
- * <p>Extends the default representer to serialize Minecraft {@link Component}
- * instances into YAML via {@link ComponentSerialization}.</p>
- *
- * <p>Also suppresses the {@code !!} class tag on the root config object
- * so the YAML file stays clean and human-readable.</p>
+ * This representer encodes {@link Component} instances as JSON objects using Minecraft's built-in JSON serialization.
+ * The resulting YAML will contain the JSON representation of the component, but without any explicit type tags,
+ * making it more human-readable and compatible with standard YAML parsers.
  */
 public class ComponentRepresenter extends Representer {
 
-    public ComponentRepresenter(Class<?> configClass, DumperOptions options) {
-        super(options);
+    /**
+     * Creates a new ComponentRepresenter with the specified configuration class and DumperOptions.
+     * 
+     * @param configClass The class of the configuration objects being represented.
+     * @param dumperOptions The DumperOptions to use for YAML output formatting.
+     */
+    public ComponentRepresenter(Class<?> configClass, DumperOptions dumperOptions) {
+        super(dumperOptions);
 
-        // Suppress the !!fully.qualified.ClassName tag on the root object
         this.addClassTag(configClass, Tag.MAP);
 
         this.representers.put(Component.class, data -> representComponent((Component) data));
         this.representers.put(MutableComponent.class, data -> representComponent((Component) data));
     }
 
+    /**
+     * Suppresses {@code !!ClassName} tags for all nested Java beans so that
+     * every nested object appears as a plain YAML mapping.
+     * 
+     * @param properties The set of properties for the Java bean.
+     * @param javaBean The Java bean instance being represented.
+     * 
+     * @return A YAML MappingNode representing the Java bean without explicit type tags.
+     */
+    @Override
+    protected MappingNode representJavaBean(Set<Property> properties, Object javaBean) {
+        addClassTag(javaBean.getClass(), Tag.MAP);
+        return super.representJavaBean(properties, javaBean);
+    }
+
+    /**
+     * Represents a Minecraft {@link Component} as a JSON object in YAML.
+     * 
+     * @param component The Minecraft Component to represent.
+     * 
+     * @return A YAML Node representing the Component as a JSON object.
+     */
     private Node representComponent(Component component) {
         JsonElement json = ComponentSerialization.CODEC
             .encodeStart(JsonOps.INSTANCE, component)
             .getOrThrow(err -> new IllegalStateException("Failed to encode Component: " + err));
-
-        // Convert JsonElement to a plain Java object that SnakeYAML can represent natively
         return represent(new Gson().fromJson(json, Object.class));
     }
 }
