@@ -38,7 +38,7 @@ Use `@Annotation.Comment` to add a description above a field in the YAML output.
 Nested objects are fully supported — annotations on their fields are picked up automatically.
 
 ```java
-import dev.loat.yaml_config_lib.annotation.Annotation;
+import dev.loat.config_lib.annotation.Annotation;
 
 public class MyConfig {
 
@@ -88,7 +88,7 @@ Create a `ConfigManager` instance with your root directory and register your con
 The recommended pattern is a dedicated `Config` class per mod:
 
 ```java
-import dev.loat.yaml_config_lib.ConfigManager;
+import dev.loat.config_lib.ConfigManager;
 
 public final class Config {
     private Config() {}
@@ -125,19 +125,7 @@ int max = Config.get().maxConnections;
 String host = Config.get().database.host;
 ```
 
-### 4. Custom logger
-
-By default the library logs via `LoggerFactory.getLogger(ConfigManager.class)`.
-Pass your own logger to route all config output through your mod's logger:
-
-```java
-private static final ConfigManager MANAGER = new ConfigManager(
-    "my_mod",
-    LoggerFactory.getLogger(MyMod.class)
-);
-```
-
-### 5. Reload
+### 4. Reload
 
 To reload all registered config files from disk at runtime (e.g. via a command):
 
@@ -145,13 +133,13 @@ To reload all registered config files from disk at runtime (e.g. via a command):
 MANAGER.reloadAll();
 ```
 
-### 6. Sub-directories
+### 5. Sub-directories
 
 Sub-directories inside the root are supported:
 
 ```java
 MANAGER.add("modules/chat.yml", ChatConfig.class);
-// → <game_dir>/config/my_mod/modules/chat.yml
+// <game_dir>/config/my_mod/modules/chat.yml
 ```
 
 ---
@@ -197,7 +185,7 @@ oldField: someValue
 All annotations are accessed via the `Annotation` container class:
 
 ```java
-import dev.loat.yaml_config_lib.annotation.Annotation;
+import dev.loat.config_lib.annotation.Annotation;
 ```
 
 ### `@Annotation.Comment`
