@@ -137,7 +137,7 @@ final class CommentWriter {
                 Object defaultValue = currentDefaults != null ? currentDefaults.get(key) : null;
                 String formatted = CommentWriter.formatDefault(defaultValue);
                 if (formatted != null) {
-                    CommentWriter.appendCommentBlock(result, "Default: " + formatted, indentStr);
+                    CommentWriter.appendCommentBlock(result, "Default value: " + formatted, indentStr);
                 }
  
                 // 4. @Annotation.Deprecated
