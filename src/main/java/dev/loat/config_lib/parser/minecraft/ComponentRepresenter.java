@@ -38,6 +38,16 @@ public class ComponentRepresenter extends Representer {
 
         this.addClassTag(configClass, Tag.MAP);
 
+        /**
+         * Serialize any enum as its plain name string to avoid !!ClassName tags.
+         * Without this, SnakeYAML serializes enums in nested objects as tagged Java
+         * beans, which the plain loader cannot
+         * resolve, silently dropping the field from the raw map.
+         * multiRepresenters is checked for superclass/interface matches, so
+         * Enum.class catches every enum type without needing per-type registration.
+         */
+        this.multiRepresenters.put(Enum.class, data -> representScalar(Tag.STR, ((Enum<?>) data).name()));
+
         this.representers.put(Component.class, data -> representComponent((Component) data));
         this.representers.put(MutableComponent.class, data -> representComponent((Component) data));
     }
