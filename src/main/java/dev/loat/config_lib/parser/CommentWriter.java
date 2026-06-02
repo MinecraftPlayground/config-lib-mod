@@ -172,10 +172,10 @@ final class CommentWriter {
      */
     private static void appendCommentBlock(StringBuilder stringBuilder, String text, String indent) {
         for (String line : text.split("\n")) {
-            String trimmed = line.trim();
+            String content = line.stripTrailing();
             stringBuilder
                 .append(indent)
-                .append(trimmed.isEmpty() ? "#" : "# " + trimmed)
+                .append(content.isEmpty() ? "#" : "# " + content)
                 .append("\n");
         }
     }
