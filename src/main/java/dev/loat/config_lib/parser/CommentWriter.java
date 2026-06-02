@@ -7,6 +7,8 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -82,7 +84,6 @@ final class CommentWriter {
         }
 
         // Stack: (class, indentOfParentKey)
-        // Root entry uses -1 so that all top-level keys (indent 0) fall inside it.
         Deque<ScopeEntry> stack = new ArrayDeque<>();
         stack.push(new ScopeEntry(rootClass, -1, defaultMap));
 
@@ -133,7 +134,7 @@ final class CommentWriter {
                     CommentWriter.appendCommentBlock(result, "Possible values: " + values, indentStr);
                 }
  
-                // 3. # Default: <value> - skipped for nested objects (Map)
+                // 3. # Default: <value> - skipped for nested objects (Map) and lists of objects (List<Map>)
                 Object defaultValue = currentDefaults != null ? currentDefaults.get(key) : null;
                 String formatted = CommentWriter.formatDefault(defaultValue);
                 if (formatted != null) {
@@ -152,6 +153,26 @@ final class CommentWriter {
                         ? (Map<String, Object>) defaultValue
                         : Map.of();
                     stack.push(new CommentWriter.ScopeEntry(field.getType(), indent, nestedDefaults));
+                }
+
+                // Push nested scope for List<NestedConfigType> so list item keys
+                // resolve correctly and are not falsely marked as deprecated.
+                // The first item's defaults map is used for # Default comments on
+                // the list item fields (all items share the same class defaults).
+                if (Collection.class.isAssignableFrom(field.getType())) {
+                    Class<?> elementType = getListElementType(field);
+                    if (elementType != null && isNestedConfigType(elementType)) {
+                        Map<String, Object> elementDefaults = Map.of();
+                        if (
+                            defaultValue instanceof List<?> list &&
+                            !list.isEmpty() &&
+                            list.get(0) instanceof Map<?, ?> firstItem
+                        ) {
+                            elementDefaults = (Map<String, Object>) firstItem;
+                        }
+
+                        stack.push(new CommentWriter.ScopeEntry(elementType, indent, elementDefaults));
+                    }
                 }
             }
 
@@ -241,6 +262,19 @@ final class CommentWriter {
         } catch (NoSuchFieldException e) {
             return null;
         }
+    }
+
+    /**
+     * Extracts the element type from a {@code List<T>} field declaration.
+     * Returns {@code null} if the type argument is not a plain class
+     * (e.g. wildcards or nested generics).
+     */
+    private static Class<?> getListElementType(Field field) {
+        Type genericType = field.getGenericType();
+        if (!(genericType instanceof ParameterizedType paramType)) return null;
+        Type[] args = paramType.getActualTypeArguments();
+        if (args.length != 1 || !(args[0] instanceof Class<?> elementClass)) return null;
+        return elementClass;
     }
 
     /**
