@@ -171,7 +171,7 @@ final class CommentWriter {
      * @param indent The indentation string to use
      */
     private static void appendCommentBlock(StringBuilder stringBuilder, String text, String indent) {
-        for (String line : text.strip().stripIndent().split("\n|\r|\r\n")) {
+        for (String line : text.stripTrailing().stripIndent().split("\n|\r|\r\n")) {
             String content = line.stripTrailing();
             stringBuilder
                 .append(indent)
