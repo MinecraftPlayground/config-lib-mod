@@ -193,6 +193,7 @@ final class CommentWriter {
         if (value instanceof Map) {return null;} // nested object - each field has its own Default line
         if (value instanceof String s) {return "'%s'".formatted(s);}
         if (value instanceof List<?> list) {
+            if (!list.isEmpty() && list.get(0) instanceof Map) return null;
             String items = ((List<Object>) list).stream()
                 .map(item -> item instanceof String ? "'%s'".formatted(item) : String.valueOf(item))
                 .collect(Collectors.joining(", "));
