@@ -54,18 +54,20 @@ final class CommentWriter {
 
     /**
      * Inserts comments into the given YAML content based on the annotations present in the config class.
-      * Comments are added above each key according to the following rules:
-      * <ul>
-      *   <li>If the corresponding field has a {@link Annotation.Comment}, its value is inserted as a block comment.</li>
-      *   <li>If the field has a {@link Annotation.Deprecated}, a deprecation warning comment is generated based on its properties.</li>
-      *   <li>If a key exists in the YAML content but has no corresponding field in the class, an orphaned key comment is added.</li>
-      * </ul>
-      *
-      * @param yamlContent The original YAML content as a string
-      * @param rootClass The root config class to use for annotation lookup
-      * @param defaultMap The map containing default values for the config fields
-      * 
-      * @return A new YAML string with comments inserted.
+     * Comments are added above each key according to the following rules:
+     * <ul>
+     *   <li>If the corresponding field has a {@link Annotation.Comment}, its value is inserted as a block comment.</li>
+     *   <li>If the field has a {@link Annotation.Deprecated}, a deprecation warning comment is generated based on its properties.</li>
+     *   <li>If a key exists in the YAML content but has no corresponding field in the class, an orphaned key comment is added.</li>
+     *   <li>List item start lines ({@code - key: value}) are handled separately so the first key's comments
+     *       appear on the {@code - } line, and a blank line is inserted between consecutive items.</li>
+     * </ul>
+     *
+     * @param yamlContent The original YAML content as a string
+     * @param rootClass The root config class to use for annotation lookup
+     * @param defaultMap The map containing default values for the config fields
+     * 
+     * @return A new YAML string with comments inserted.
      */
     @SuppressWarnings("unchecked")
     private static String insertComments(
@@ -79,26 +81,40 @@ final class CommentWriter {
         // Class-level @Annotation.Comment → file header banner
         Annotation.Comment classComment = rootClass.getAnnotation(Annotation.Comment.class);
         if (classComment != null) {
-            appendCommentBlock(result, classComment.value(), "");
+            CommentWriter.appendCommentBlock(result, classComment.value(), "");
             result.append("\n");
         }
 
-        // Stack: (class, indentOfParentKey)
+        // Stack: (class, indentOfParentKey, defaults, fromList)
+        // Root entry uses -1 so that all top-level keys (indent 0) fall inside it.
         Deque<ScopeEntry> stack = new ArrayDeque<>();
-        stack.push(new ScopeEntry(rootClass, -1, defaultMap));
+        stack.push(new ScopeEntry(rootClass, -1, defaultMap, false));
 
         for (String line : lines) {
             String trimmed = line.stripLeading();
             int indent = line.length() - trimmed.length();
 
-            // Pass through: empty lines, existing comments, list items, lines without a colon
+            // Pass through: empty lines, existing comments, lines without a colon
             if (
                 trimmed.isEmpty() ||
                 trimmed.startsWith("#") ||
-                trimmed.startsWith("-") ||
                 !trimmed.contains(":")
             ) {
                 result.append(line).append("\n");
+                continue;
+            }
+
+            // List item start lines ("- key: value"):
+            // Do NOT pop the scope stack here — the list element scope must stay
+            // active for the entire duration of all list items.
+            if (trimmed.startsWith("- ")) {
+                String itemContent = trimmed.substring(2);
+                ScopeEntry top = stack.peek();
+                if (top.fromList && itemContent.contains(":")) {
+                    CommentWriter.handleListItemLine(result, itemContent, indent, " ".repeat(indent), top);
+                } else {
+                    result.append(line).append("\n");
+                }
                 continue;
             }
 
@@ -106,73 +122,44 @@ final class CommentWriter {
             String indentStr = " ".repeat(indent);
 
             // Leave only the scopes that are still active at this indentation level
-            while (stack.size() > 1 && stack.peek().parentIndent() >= indent) {
+            while (stack.size() > 1 && stack.peek().parentIndent >= indent) {
                 stack.pop();
             }
 
-            Class<?> currentClass = stack.peek().clazz();
-            Map<String, Object> currentDefaults = stack.peek().defaults();
+            Class<?> currentClass = stack.peek().clazz;
+            Map<String, Object> currentDefaults = stack.peek().defaults;
             Field field = CommentWriter.findField(currentClass, key);
+            Object defaultValue = currentDefaults != null ? currentDefaults.get(key) : null;
 
-            if (field == null) {
-                // Key exists on disk but is no longer in the class
-                result
-                    .append(indentStr)
-                    .append("# Deprecated: This key is no longer used and can be removed safely.\n");
-            } else {
-                // 1. @Annotation.Comment
-                Annotation.Comment comment = field.getAnnotation(Annotation.Comment.class);
-                if (comment != null) {
-                    CommentWriter.appendCommentBlock(result, comment.value(), indentStr);
-                }
- 
-                // 2. # Possible values: A | B | C - only for enum fields
-                if (field.getType().isEnum()) {
-                    String values = Arrays.stream(field.getType().getEnumConstants())
-                        .map(Object::toString)
-                        .collect(Collectors.joining(" | "));
-                    CommentWriter.appendCommentBlock(result, "Possible values: " + values, indentStr);
-                }
- 
-                // 3. # Default: <value> - skipped for nested objects (Map) and lists of objects (List<Map>)
-                Object defaultValue = currentDefaults != null ? currentDefaults.get(key) : null;
-                String formatted = CommentWriter.formatDefault(defaultValue);
-                if (formatted != null) {
-                    CommentWriter.appendCommentBlock(result, "Default value: " + formatted, indentStr);
-                }
- 
-                // 4. @Annotation.Deprecated
-                Annotation.Deprecated dep = field.getAnnotation(Annotation.Deprecated.class);
-                if (dep != null) {
-                    CommentWriter.appendCommentBlock(result, CommentWriter.buildDeprecatedComment(dep), indentStr);
-                }
- 
-                // Push nested scope with the nested defaults map
-                if (CommentWriter.isNestedConfigType(field.getType())) {
-                    Map<String, Object> nestedDefaults = defaultValue instanceof Map
-                        ? (Map<String, Object>) defaultValue
-                        : Map.of();
-                    stack.push(new CommentWriter.ScopeEntry(field.getType(), indent, nestedDefaults));
-                }
+            // Write all comment lines for this key
+            for (String commentLine : CommentWriter.buildFieldCommentLines(field, key, indentStr, currentDefaults)) {
+                result.append(commentLine).append("\n");
+            }
 
-                // Push nested scope for List<NestedConfigType> so list item keys
-                // resolve correctly and are not falsely marked as deprecated.
-                // The first item's defaults map is used for # Default comments on
-                // the list item fields (all items share the same class defaults).
-                if (Collection.class.isAssignableFrom(field.getType())) {
-                    Class<?> elementType = getListElementType(field);
-                    if (elementType != null && isNestedConfigType(elementType)) {
-                        Map<String, Object> elementDefaults = Map.of();
-                        if (
-                            defaultValue instanceof List<?> list &&
-                            !list.isEmpty() &&
-                            list.get(0) instanceof Map<?, ?> firstItem
-                        ) {
-                            elementDefaults = (Map<String, Object>) firstItem;
-                        }
+            // Push nested scope with the nested defaults map
+            if (field != null && CommentWriter.isNestedConfigType(field.getType())) {
+                Map<String, Object> nestedDefaults = defaultValue instanceof Map
+                    ? (Map<String, Object>) defaultValue
+                    : Map.of();
+                stack.push(new ScopeEntry(field.getType(), indent, nestedDefaults, false));
+            }
 
-                        stack.push(new CommentWriter.ScopeEntry(elementType, indent, elementDefaults));
+            // Push nested scope for List<NestedConfigType> so list item keys
+            // resolve correctly and are not falsely marked as deprecated.
+            // The first item's defaults map is used for # Default value comments on
+            // the list item fields (all items share the same class defaults).
+            if (field != null && Collection.class.isAssignableFrom(field.getType())) {
+                Class<?> elementType = CommentWriter.getListElementType(field);
+                if (elementType != null && CommentWriter.isNestedConfigType(elementType)) {
+                    Map<String, Object> elementDefaults = Map.of();
+                    if (
+                        defaultValue instanceof List<?> list &&
+                        !list.isEmpty() &&
+                        list.get(0) instanceof Map<?, ?> firstItem
+                    ) {
+                        elementDefaults = (Map<String, Object>) firstItem;
                     }
+                    stack.push(new ScopeEntry(elementType, indent, elementDefaults, true));
                 }
             }
 
@@ -182,6 +169,113 @@ final class CommentWriter {
         }
 
         return result.toString();
+    }
+
+    /**
+     * Handles a list item start line (e.g. {@code - key1: value1}).
+     *
+     * <p>The first key's comments are placed on the {@code - } line itself.
+     * A blank line is inserted before every non-first item for readability.</p>
+     *
+     * @param result The {@link StringBuilder} to append the output to
+     * @param itemContent The content after {@code "- "} (e.g. {@code "key1: value1"})
+     * @param listIndent The indentation level of the {@code - } character
+     * @param listIndentStr The indentation string for the {@code - } character
+     * @param listScope The active {@link ScopeEntry} for the list element type
+     */
+    private static void handleListItemLine(
+        StringBuilder result,
+        String itemContent,
+        int listIndent,
+        String listIndentStr,
+        ScopeEntry listScope
+    ) {
+        String itemKey = itemContent.substring(0, itemContent.indexOf(":")).trim();
+        String itemValuePart = itemContent.substring(itemContent.indexOf(":")); // ": value" or ":"
+        String itemIndentStr = " ".repeat(listIndent + 2);
+
+        // Add blank line before non-first items
+        if (!listScope.isFirstItem) {
+            result.append("\n");
+        }
+        listScope.isFirstItem = false;
+
+        List<String> commentLines = CommentWriter.buildFieldCommentLines(
+            CommentWriter.findField(listScope.clazz, itemKey),
+            itemKey,
+            itemIndentStr,
+            listScope.defaults
+        );
+
+        if (commentLines.isEmpty()) {
+            // No comments: output the line as-is
+            result.append(listIndentStr).append("- ").append(itemContent).append("\n");
+        } else {
+            // First comment on the same line as "- ", remaining on subsequent lines
+            result.append(listIndentStr).append("- ").append(commentLines.get(0).stripLeading()).append("\n");
+            for (int i = 1; i < commentLines.size(); i++) {
+                result.append(commentLines.get(i)).append("\n");
+            }
+            result.append(itemIndentStr).append(itemKey).append(itemValuePart).append("\n");
+        }
+    }
+
+    /**
+     * Builds the list of formatted comment lines for a field.
+     * Returns a single deprecated notice line if the field is {@code null} (orphaned key).
+     *
+     * @param field The field to build comments for, or {@code null} for orphaned keys
+     * @param key The YAML key name
+     * @param indentStr The indentation string to prepend to each comment line
+     * @param defaults The map of default values for the current scope
+     * 
+     * @return An ordered list of comment lines, each already indented and prefixed with {@code #}
+     */
+    private static List<String> buildFieldCommentLines(
+        Field field,
+        String key,
+        String indentStr,
+        Map<String, Object> defaults
+    ) {
+        List<String> lines = new ArrayList<>();
+
+        if (field == null) {
+            // Key exists on disk but is no longer in the class
+            lines.add(indentStr + "# @deprecated: This field is deprecated and can be removed.");
+            return lines;
+        }
+
+        // 1. @Annotation.Comment
+        Annotation.Comment comment = field.getAnnotation(Annotation.Comment.class);
+        if (comment != null) {
+            for (String commentLine : comment.value().stripIndent().split("\n")) {
+                String content = commentLine.stripTrailing();
+                lines.add(indentStr + (content.isEmpty() ? "#" : "# " + content));
+            }
+        }
+
+        // 2. # Possible values: A | B | C - only for enum fields
+        if (field.getType().isEnum()) {
+            String values = Arrays.stream(field.getType().getEnumConstants())
+                .map(Object::toString)
+                .collect(Collectors.joining(" | "));
+            lines.add(indentStr + "# @possible: " + values);
+        }
+
+        // 3. # Default value: <value> - skipped for nested objects (Map) and lists of objects (List<Map>)
+        Object defaultValue = defaults != null ? defaults.get(key) : null;
+        String formatted = CommentWriter.formatDefault(defaultValue);
+        if (formatted != null) {
+            lines.add(indentStr + "# @default: " + formatted);
+        }
+
+        // 4. @Annotation.Deprecated
+        Annotation.Deprecated dep = field.getAnnotation(Annotation.Deprecated.class);
+        if (dep != null) {
+            lines.add(indentStr + CommentWriter.buildDeprecatedComment(dep));
+        }
+
+        return lines;
     }
 
     /**
@@ -211,10 +305,10 @@ final class CommentWriter {
     @SuppressWarnings("unchecked")
     private static String formatDefault(Object value) {
         if (value == null) {return null;}
-        if (value instanceof Map) {return null;} // nested object - each field has its own Default line
+        if (value instanceof Map) {return null;} // nested object - each field has its own Default value line
         if (value instanceof String s) {return "'%s'".formatted(s);}
         if (value instanceof List<?> list) {
-            if (!list.isEmpty() && list.get(0) instanceof Map) return null;
+            if (!list.isEmpty() && list.get(0) instanceof Map) return null; // list of objects - skip
             String items = ((List<Object>) list).stream()
                 .map(item -> item instanceof String ? "'%s'".formatted(item) : String.valueOf(item))
                 .collect(Collectors.joining(", "));
@@ -225,16 +319,16 @@ final class CommentWriter {
 
     /**
      * Builds a deprecation comment based on the properties of the given annotation.
-      * If a message is provided, it is included verbatim. Otherwise, the presence
-      * of other properties determines the content of the comment.
-      * 
-      * @param deprecationAnnotation The {@link Annotation.Deprecated} instance to build the comment from
-      * 
-      * @return A string containing the formatted deprecation comment
+     * If a message is provided, it is included verbatim. Otherwise, the presence
+     * of other properties determines the content of the comment.
+     * 
+     * @param deprecationAnnotation The {@link Annotation.Deprecated} instance to build the comment from
+     * 
+     * @return A string containing the formatted deprecation comment
      */
     private static String buildDeprecatedComment(Annotation.Deprecated deprecationAnnotation) {
         if (!deprecationAnnotation.message().isEmpty()) {
-            return "# Deprecated: " + deprecationAnnotation.message();
+            return "# @deprecated: " + deprecationAnnotation.message();
         }
         List<String> parts = new ArrayList<>();
         if (!deprecationAnnotation.migratedTo().isEmpty()) {
@@ -244,8 +338,8 @@ final class CommentWriter {
             parts.add("Will be removed in version " + deprecationAnnotation.removedIn());
         }
         return parts.isEmpty()
-            ? "# Deprecated: This field is deprecated and can be removed."
-            : "# Deprecated: " + String.join(". ", parts) + ".";
+            ? "# @deprecated: This field is deprecated and can be removed."
+            : "# @deprecated: " + String.join(". ", parts) + ".";
     }
 
     /**
@@ -268,6 +362,10 @@ final class CommentWriter {
      * Extracts the element type from a {@code List<T>} field declaration.
      * Returns {@code null} if the type argument is not a plain class
      * (e.g. wildcards or nested generics).
+     *
+     * @param field The field to extract the element type from
+     * 
+     * @return The element class, or {@code null} if it cannot be determined
      */
     private static Class<?> getListElementType(Field field) {
         Type genericType = field.getGenericType();
@@ -298,16 +396,41 @@ final class CommentWriter {
             type == Character.class
         ) {
             return false;
-        };
+        }
         return true;
     }
 
     /**
-     * A record representing a scope entry for nested config classes.
+     * A class representing a scope entry for nested config classes.
      *
-     * @param clazz The class of the scope entry
-     * @param parentIndent The indentation level of the parent scope
-     * @param defaults The map of default values for the fields in this scope
+     * <p>Using a class instead of a record so that {@link #isFirstItem} can be mutated
+     * as list items are processed.</p>
+     *
+     * @see #fromList
+     * @see #isFirstItem
      */
-    private record ScopeEntry(Class<?> clazz, int parentIndent, Map<String, Object> defaults) {}
+    private static final class ScopeEntry {
+
+        /** The Java class active at this scope level. */
+        final Class<?> clazz;
+
+        /** The indentation level of the key that introduced this scope. */
+        final int parentIndent;
+
+        /** Default values for the fields in this scope. */
+        final Map<String, Object> defaults;
+
+        /** {@code true} if this scope was pushed for a {@code List<NestedConfigType>} field. */
+        final boolean fromList;
+
+        /** Tracks whether the first list item has been written. Only relevant when {@link #fromList} is {@code true}. */
+        boolean isFirstItem = true;
+
+        ScopeEntry(Class<?> clazz, int parentIndent, Map<String, Object> defaults, boolean fromList) {
+            this.clazz = clazz;
+            this.parentIndent = parentIndent;
+            this.defaults = defaults;
+            this.fromList = fromList;
+        }
+    }
 }
