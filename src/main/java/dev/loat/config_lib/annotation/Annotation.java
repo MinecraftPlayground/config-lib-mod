@@ -35,7 +35,7 @@ public final class Annotation {
      *     First line.
      *       Indented sub-line.
      *     Back to normal.
-     *     """)
+     * """)
      * public String logLevel = "INFO";
      * }</pre>
      *
@@ -51,6 +51,35 @@ public final class Annotation {
     @Retention(RetentionPolicy.RUNTIME)
     @Target({ElementType.TYPE, ElementType.FIELD})
     public @interface Comment {
+        String value();
+    }
+
+    /**
+     * Overrides the YAML key name for a field.
+     *
+     * <p>By default the Java field name is used as the YAML key. This annotation
+     * allows using a different naming convention (e.g. kebab-case) in the config
+     * file while keeping standard Java field naming in the class.</p>
+     *
+     * <p>Example:</p>
+     * <pre>{@code
+     * @Annotation.Key("my-number")
+     * public int myNumber = 20;
+     * }</pre>
+     *
+     * <p>Output in YAML:</p>
+     * <pre><code class="language-yaml">
+     * # @default: 20
+     * position-notification-interval-ticks: 20
+     * </code></pre>
+     */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target(ElementType.FIELD)
+    public @interface Key {
+
+        /**
+         * The YAML key name to use instead of the Java field name.
+         */
         String value();
     }
 

@@ -41,7 +41,7 @@ import java.util.List;
 @Annotation.Comment("""
     Main configuration file for MyMod.
     Edit values below to customize the mod's behavior.
-    """)
+""")
 public class MyConfig {
     private MyConfig() {}
 
@@ -219,7 +219,7 @@ Multi-line comments are supported. Relative indentation within the text is prese
     First line.
       Indented sub-line.
     Back to normal.
-    """)
+""")
 public String logLevel = "INFO";
 ```
 Output:
@@ -230,6 +230,25 @@ Output:
 # Default: 'INFO'
 logLevel: INFO
 ```
+
+### `@Annotation.Key`
+
+Overrides the YAML key name for a field.
+
+By default, the Java field name is used as the YAML key. This annotation allows using a different naming convention (e.g. kebab-case or snake_case) in the config file while keeping standard Java field naming in the class:
+
+```java
+@Annotation.Key("my-number")
+public int myNumber = 20;
+```
+
+Output:
+```yaml
+# Default: 20
+my-number: 20
+```
+
+---
 
 ### `@Annotation.Deprecated`
 

@@ -7,14 +7,11 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
@@ -137,7 +134,7 @@ final class CommentWriter {
             }
 
             // Push nested scope with the nested defaults map
-            if (field != null && CommentWriter.isNestedConfigType(field.getType())) {
+            if (field != null && ConfigMerger.isNestedConfigType(field.getType())) {
                 Map<String, Object> nestedDefaults = defaultValue instanceof Map
                     ? (Map<String, Object>) defaultValue
                     : Map.of();
@@ -148,9 +145,9 @@ final class CommentWriter {
             // resolve correctly and are not falsely marked as deprecated.
             // The first item's defaults map is used for # Default value comments on
             // the list item fields (all items share the same class defaults).
-            if (field != null && Collection.class.isAssignableFrom(field.getType())) {
-                Class<?> elementType = CommentWriter.getListElementType(field);
-                if (elementType != null && CommentWriter.isNestedConfigType(elementType)) {
+            if (field != null && java.util.Collection.class.isAssignableFrom(field.getType())) {
+                Class<?> elementType = ConfigMerger.getListElementType(field);
+                if (elementType != null && ConfigMerger.isNestedConfigType(elementType)) {
                     Map<String, Object> elementDefaults = Map.of();
                     if (
                         defaultValue instanceof List<?> list &&
@@ -241,16 +238,15 @@ final class CommentWriter {
 
         if (field == null) {
             // Key exists on disk but is no longer in the class
-            lines.add(indentStr + "# @deprecated: This field is deprecated and can be removed.");
+            lines.add(indentStr + "# @deprecated: This key is no longer used and can be removed safely.");
             return lines;
         }
 
         // 1. @Annotation.Comment
         Annotation.Comment comment = field.getAnnotation(Annotation.Comment.class);
         if (comment != null) {
-            for (String commentLine : comment.value().stripIndent().split("\n")) {
-                String content = commentLine.stripTrailing();
-                lines.add(indentStr + (content.isEmpty() ? "#" : "# " + content));
+            for (String commentLine : CommentWriter.normalizeCommentLines(comment.value())) {
+                lines.add(indentStr + (commentLine.isEmpty() ? "#" : "# " + commentLine));
             }
         }
 
@@ -279,18 +275,17 @@ final class CommentWriter {
     }
 
     /**
-     * Appends a block of comments to the result builder.
+     * Appends a block of comments to the result builder, preserving relative indentation.
      *
      * @param stringBuilder The {@link StringBuilder} to append the comments to
      * @param text The comment text to append
      * @param indent The indentation string to use
      */
     private static void appendCommentBlock(StringBuilder stringBuilder, String text, String indent) {
-        for (String line : text.stripTrailing().stripIndent().split("\n|\r|\r\n")) {
-            String content = line.stripTrailing();
+        for (String line : CommentWriter.normalizeCommentLines(text)) {
             stringBuilder
                 .append(indent)
-                .append(content.isEmpty() ? "#" : "# " + content)
+                .append(line.isEmpty() ? "#" : "# " + line)
                 .append("\n");
         }
     }
@@ -343,61 +338,64 @@ final class CommentWriter {
     }
 
     /**
-     * Finds a declared field with the given name in the class, or returns {@code null} if not found.
-     * 
-     * @param clazz The class to search for the field
-     * @param name The field name to find
-     * 
-     * @return The {@link Field} if found, or {@code null} if no such field exists in the class.
-     */
-    private static Field findField(Class<?> clazz, String name) {
-        try {
-            return clazz.getDeclaredField(name);
-        } catch (NoSuchFieldException e) {
-            return null;
-        }
-    }
-
-    /**
-     * Extracts the element type from a {@code List<T>} field declaration.
-     * Returns {@code null} if the type argument is not a plain class
-     * (e.g. wildcards or nested generics).
+     * Finds the field in {@code clazz} whose YAML key matches {@code yamlKey}.
      *
-     * @param field The field to extract the element type from
+     * <p>The match respects {@link Annotation.Key}: a field annotated with
+     * {@code @Annotation.Key("custom-key")} is found when {@code yamlKey} is
+     * {@code "custom-key"}. For unannotated fields the Java field name is used.</p>
+     *
+     * @param clazz The class to search in
+     * @param yamlKey The YAML key to match
      * 
-     * @return The element class, or {@code null} if it cannot be determined
+     * @return The matching {@link Field}, or {@code null} if none found
      */
-    private static Class<?> getListElementType(Field field) {
-        Type genericType = field.getGenericType();
-        if (!(genericType instanceof ParameterizedType paramType)) return null;
-        Type[] args = paramType.getActualTypeArguments();
-        if (args.length != 1 || !(args[0] instanceof Class<?> elementClass)) return null;
-        return elementClass;
+    private static Field findField(Class<?> clazz, String yamlKey) {
+        for (Field field : clazz.getDeclaredFields()) {
+            if (!field.isSynthetic() && ConfigMerger.getYamlKey(field).equals(yamlKey)) {
+                return field;
+            }
+        }
+        return null;
     }
 
     /**
-     * Determines if a type should be treated as a nested config class for comment insertion purposes.
+     * Strips the common leading whitespace from all non-blank lines in {@code text}
+     * and removes trailing blank lines.
+     *
+     * <p>This is more robust than {@link String#stripIndent()} for annotation values
+     * because Java text blocks with a closing {@code """} at column 0 do not strip
+     * any indentation at compile time, leaving leading spaces in the annotation value.</p>
+     *
+     * @param text The raw comment text
      * 
-     * @param type The class to check
-     * 
-     * @return {@code true} if the type is a nested config class, or {@code false} if it is a primitive,
-     * String, Collection, Map, array, enum, or boxed type.
+     * @return A list of lines with common indentation removed and trailing blank lines dropped
      */
-    private static boolean isNestedConfigType(Class<?> type) {
-        if (
-            type.isPrimitive() ||
-            type == String.class ||
-            type.isArray() ||
-            type.isEnum() ||
-            Collection.class.isAssignableFrom(type) ||
-            Map.class.isAssignableFrom(type) ||
-            Number.class.isAssignableFrom(type) ||
-            type == Boolean.class ||
-            type == Character.class
-        ) {
-            return false;
+    private static List<String> normalizeCommentLines(String text) {
+        String[] rawLines = text.split("\n", -1);
+
+        // Find the minimum number of leading spaces across all non-blank lines
+        int minIndent = Integer.MAX_VALUE;
+        for (String line : rawLines) {
+            if (!line.isBlank()) {
+                int spaces = 0;
+                while (spaces < line.length() && line.charAt(spaces) == ' ') spaces++;
+                minIndent = Math.min(minIndent, spaces);
+            }
         }
-        return true;
+        if (minIndent == Integer.MAX_VALUE) minIndent = 0;
+
+        // Strip common indent and trailing whitespace from each line
+        List<String> result = new ArrayList<>();
+        for (String line : rawLines) {
+            result.add(line.isBlank() ? "" : line.substring(Math.min(minIndent, line.length())).stripTrailing());
+        }
+
+        // Remove trailing blank lines
+        while (!result.isEmpty() && result.get(result.size() - 1).isBlank()) {
+            result.remove(result.size() - 1);
+        }
+
+        return result;
     }
 
     /**
