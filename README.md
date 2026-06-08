@@ -2,7 +2,7 @@
 
 # Config Lib
 
-A Fabric library for managing YAML configuration files with smart merge support — new fields are added automatically when your config class changes, without overwriting existing user values.
+A Fabric library for managing YAML configuration files with smart merge support - new fields are added automatically when your config class changes, without overwriting existing user values.
 
 ## Installation
 
@@ -35,7 +35,7 @@ And declare the dependency in your `fabric.mod.json`:
 A config class is a plain Java class with public instance fields. Default values are written to the file when it is first created.
 
 ```java
-import dev.loat.yaml_config_lib.annotation.Annotation;
+import dev.loat.config_lib.annotation.Annotation;
 import java.util.List;
 
 @Annotation.Comment("""
@@ -77,23 +77,23 @@ Output:
 
 # The log level.
 # Can be DEBUG, INFO, WARN or ERROR.
-# Default: 'INFO'
+# @default: 'INFO'
 logLevel: INFO
 # Maximum number of connections.
-# Default: 10
+# @default: 10
 maxConnections: 10
 # Enabled features.
-# Default: ['chat', 'alerts']
+# @default: ['chat', 'alerts']
 features:
 - chat
 - alerts
 # Database connection settings.
 database:
   # The database host.
-  # Default: 'localhost'
+  # @default: 'localhost'
   host: localhost
   # The database port.
-  # Default: 5432
+  # @default: 5432
   port: 5432
 ```
 
@@ -102,7 +102,7 @@ database:
 Create a `ConfigManager` instance and wrap it in a dedicated `Config` class:
 
 ```java
-import dev.loat.yaml_config_lib.ConfigManager;
+import dev.loat.config_lib.ConfigManager;
 
 public final class Config {
     private Config() {}
@@ -171,7 +171,7 @@ After adding `features` to the class:
 logLevel: DEBUG
 maxConnections: 10
 # Enabled features.
-# Default: ['chat', 'alerts']
+# @default: ['chat', 'alerts']
 features:
 - chat
 - alerts
@@ -194,20 +194,20 @@ oldField: someValue
 All annotations are accessed via the `Annotation` container class:
 
 ```java
-import dev.loat.yaml_config_lib.annotation.Annotation;
+import dev.loat.config_lib.annotation.Annotation;
 ```
 
 ### `@Annotation.Comment`
 
 Can be placed on a **class** or a **field**.
 
-On a **class** — written as a banner at the very top of the file:
+On a **class** - written as a banner at the very top of the file:
 ```java
 @Annotation.Comment("Main configuration file for MyMod.")
 public class MyConfig { ... }
 ```
 
-On a **field** — written above that key:
+On a **field** - written above that key:
 ```java
 @Annotation.Comment("The log level.")
 public String logLevel = "INFO";
@@ -227,7 +227,7 @@ Output:
 # First line.
 #   Indented sub-line.
 # Back to normal.
-# Default: 'INFO'
+# @default: 'INFO'
 logLevel: INFO
 ```
 
@@ -244,7 +244,7 @@ public int myNumber = 20;
 
 Output:
 ```yaml
-# Default: 20
+# @default: 20
 my-number: 20
 ```
 
@@ -273,7 +273,7 @@ logLevel: INFO
 |---|---|
 | `migratedTo` | The new key this field was replaced by |
 | `removedIn` | The version in which this field will be removed |
-| `message` | Custom message — if set, `migratedTo` and `removedIn` are ignored |
+| `message` | Custom message - if set, `migratedTo` and `removedIn` are ignored |
 
 ---
 
@@ -283,10 +283,11 @@ Every scalar and list field automatically gets a `# Default: <value>` comment li
 
 | Field type | Format |
 |---|---|
-| `String` | `# Default: 'value'` |
-| `int`, `double`, `boolean`, … | `# Default: 42` |
-| `List<String>` | `# Default: ['a', 'b', 'c']` |
-| Nested object | *(skipped — each nested field has its own line)* |
+| `String` | `@default: 'value'` |
+| `int`\| `double` \| `boolean` \| ... | `@default: 42` |
+| `List<String>` | `@default: ['a', 'b', 'c']` |
+| `Enum` | `@default: A \| B \| C` |
+| Nested object | *(skipped - each nested field has its own line)* |
 
 ---
 
@@ -297,6 +298,13 @@ Fields of type `net.minecraft.network.chat.Component` are supported out of the b
 ```java
 @Annotation.Comment("The message shown to players on join.")
 public Component joinMessage = Component.literal("Welcome!");
+```
+
+Output:
+```yaml
+# The message shown to players on join.
+# @default: 'Welcome!'
+joinMessage: Welcome!
 ```
 
 ---
