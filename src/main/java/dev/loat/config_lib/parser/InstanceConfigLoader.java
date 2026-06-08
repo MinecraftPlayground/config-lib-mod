@@ -31,16 +31,28 @@ final class InstanceConfigLoader<ConfigClass> {
     private final Path path;
     private final Class<ConfigClass> configClass;
 
+    /**
+     * Creates a new config loader for the specified path and config class.
+     *
+     * @param path The path to the YAML config file
+     * @param configClass The config class to load into
+     */
     InstanceConfigLoader(Path path, Class<ConfigClass> configClass) {
         this.path = path;
         this.configClass = configClass;
     }
 
+    /**
+     * Loads the config from disk or creates defaults if the file doesn't exist.
+     * Merges disk config with defaults and synchronizes new/orphaned keys.
+     *
+     * @return An instance of the config class populated with loaded or default values
+     */
     ConfigClass load() {
         ConfigClass defaults = this.createInstance();
 
         if (!Files.exists(this.path)) {
-            Logger.info("Config '%s' not found. Writing defaults.".formatted(this.path.getFileName()));
+            Logger.info("Config '%s' not found. Writing defaults.".formatted(this.path.toString()));
             this.writeDefaults(this.objectToRawMap(defaults), Set.of());
             return defaults;
         }
@@ -48,7 +60,7 @@ final class InstanceConfigLoader<ConfigClass> {
         Map<String, Object> diskMap = ConfigMerger.readRawMap(this.path);
 
         if (diskMap.isEmpty()) {
-            Logger.warning("Config '%s' is empty. Writing defaults.".formatted(this.path.getFileName()));
+            Logger.warning("Config '%s' is empty. Writing defaults.".formatted(this.path.toString()));
             this.writeDefaults(this.objectToRawMap(defaults), Set.of());
             return defaults;
         }
@@ -89,6 +101,13 @@ final class InstanceConfigLoader<ConfigClass> {
         return this.rawMapToObject(cleanMap);
     }
 
+    /**
+     * Converts a config instance to a raw map representation.
+     * Serializes the object to YAML, then back to a map with keys reordered and renamed.
+     *
+     * @param instance The config instance to convert
+     * @return A map with YAML key names and nested structures
+     */
     @SuppressWarnings("unchecked")
     private Map<String, Object> objectToRawMap(ConfigClass instance) {
         Yaml dumpYaml = new Yaml(new ComponentRepresenter(this.configClass, YAMLOptions.block()), YAMLOptions.block());
@@ -100,6 +119,13 @@ final class InstanceConfigLoader<ConfigClass> {
         return InstanceConfigLoader.reorderAndRenameKeys(rawMap, this.configClass);
     }
 
+    /**
+     * Converts a raw map back to a config instance.
+     * Reverses YAML key renaming, serializes to YAML, then deserializes to the target class.
+     *
+     * @param map A map with YAML key names to convert
+     * @return An instance of the config class
+     */
     private ConfigClass rawMapToObject(Map<String, Object> map) {
         Map<String, Object> reversedMap = InstanceConfigLoader.reverseRenameKeys(map, this.configClass);
         String yamlContent = new Yaml(YAMLOptions.block()).dump(reversedMap);
@@ -108,6 +134,12 @@ final class InstanceConfigLoader<ConfigClass> {
         return new Yaml(new ComponentConstructor(this.configClass, loaderOptions)).load(yamlContent);
     }
 
+    /**
+     * Writes the default config map to disk with comments.
+     *
+     * @param defaultMap The default configuration values
+     * @param orphanedKeys Keys that are no longer part of the config class
+     */
     private void writeDefaults(Map<String, Object> defaultMap, Set<String> orphanedKeys) {
         CommentWriter.write(
             this.path,
@@ -117,11 +149,17 @@ final class InstanceConfigLoader<ConfigClass> {
         );
     }
 
+    /**
+     * Creates an instance of the config class using its no-arg constructor.
+     *
+     * @return A new instance of the config class
+     * @throws RuntimeException If the config class lacks a no-arg constructor
+     */
     private ConfigClass createInstance() {
         try {
-            Constructor<ConfigClass> ctor = this.configClass.getDeclaredConstructor();
-            ctor.setAccessible(true);
-            return ctor.newInstance();
+            Constructor<ConfigClass> constructor = this.configClass.getDeclaredConstructor();
+            constructor.setAccessible(true);
+            return constructor.newInstance();
         } catch (Exception e) {
             throw new RuntimeException(
                 "Config class '%s' must have a no-arg constructor.".formatted(this.configClass.getName()), e
@@ -141,7 +179,7 @@ final class InstanceConfigLoader<ConfigClass> {
      * whose name differs from its {@link Annotation.Key} would be incorrectly appended a
      * second time.</p>
      *
-     * @param map   A map whose keys are Java field names (as produced by SnakeYAML)
+     * @param map A map whose keys are Java field names (as produced by SnakeYAML)
      * @param clazz The config class whose field order and key annotations drive the rename
      * @return A new map with YAML key names in declaration order
      */
