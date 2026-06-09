@@ -97,6 +97,32 @@ database:
   port: 5432
 ```
 
+#### Constraints
+ 
+- The **root config class** may have a private no-arg constructor.
+- **Nested config classes** (used as field types) must have a **public no-arg constructor**, since SnakeYAML needs to instantiate them during deserialization.
+- **Nested config classes defined inside another class** must be declared **`static`**. Non-static inner classes require an outer class instance to be constructed and cannot be instantiated by SnakeYAML. Omitting `static` causes a `NoSuchMethodException` at load time whenever the config file already exists on disk.
+
+  > ```java
+  > // Wrong - non-static inner class, SnakeYAML cannot instantiate this
+  > public class HealthConfig {
+  >     public Notification notification = new Notification();
+  >
+  >     public class Notification {        // missing static!
+  >         public int intervalTicks = 20;
+  >     }
+  > }
+  > 
+  > // Correct — static nested class
+  > public class HealthConfig {
+  >     public Notification notification = new Notification();
+  > 
+  >     public static class Notification { // static -> works
+  >         public int intervalTicks = 20;
+  >     }
+  > }
+  > ```
+
 ### 2. Set up the ConfigManager
 
 Create a `ConfigManager` instance and wrap it in a dedicated `Config` class:
