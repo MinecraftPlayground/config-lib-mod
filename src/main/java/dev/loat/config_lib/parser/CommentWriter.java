@@ -102,7 +102,7 @@ final class CommentWriter {
             }
 
             // List item start lines ("- key: value"):
-            // Do NOT pop the scope stack here — the list element scope must stay
+            // Do NOT pop the scope stack here - the list element scope must stay
             // active for the entire duration of all list items.
             if (trimmed.startsWith("- ")) {
                 String itemContent = trimmed.substring(2);

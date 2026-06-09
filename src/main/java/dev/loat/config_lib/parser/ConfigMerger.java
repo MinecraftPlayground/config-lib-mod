@@ -124,7 +124,7 @@ final class ConfigMerger {
      * should be recursively processed (renamed, reordered, annotated).
      *
      * <p>Excludes primitives, {@link String}, arrays, enums, collections, maps,
-     * and boxed types — these are serialized as scalars or sequences.</p>
+     * and boxed types - these are serialized as scalars or sequences.</p>
      *
      * @param type The class to check
      *

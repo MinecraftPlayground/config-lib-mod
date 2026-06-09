@@ -45,8 +45,15 @@ import java.util.List;
 public class MyConfig {
     private MyConfig() {}
 
-    @Annotation.Comment("The log level.\nCan be DEBUG, INFO, WARN or ERROR.")
-    public String logLevel = "INFO";
+    @Annotation.Comment("The log level.")
+    public String logLevel = LogLevel.INFO;
+
+    public static enum LogLevel {
+        DEBUG,
+        INFO,
+        WARN,
+        ERROR
+    }
 
     @Annotation.Comment("Maximum number of connections.")
     public int maxConnections = 10;
@@ -76,7 +83,7 @@ Output:
 # Edit values below to customize the mod's behavior.
 
 # The log level.
-# Can be DEBUG, INFO, WARN or ERROR.
+# @possible: DEBUG | INFO | WARN | ERROR
 # @default: 'INFO'
 logLevel: INFO
 # Maximum number of connections.
@@ -113,7 +120,7 @@ database:
   >     }
   > }
   > 
-  > // Correct — static nested class
+  > // Correct - static nested class
   > public class HealthConfig {
   >     public Notification notification = new Notification();
   > 

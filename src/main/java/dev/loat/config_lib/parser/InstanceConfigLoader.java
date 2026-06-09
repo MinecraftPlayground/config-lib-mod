@@ -175,7 +175,7 @@ final class InstanceConfigLoader<ConfigClass> {
      *
      * <p>Keys with no matching field (truly orphaned) are appended at the end. The check
      * uses the <em>original Java field names</em> that were processed, not the potentially
-     * renamed YAML keys stored in {@code ordered} — without this distinction, any field
+     * renamed YAML keys stored in {@code ordered} - without this distinction, any field
      * whose name differs from its {@link Annotation.Key} would be incorrectly appended a
      * second time.</p>
      *
