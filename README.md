@@ -46,7 +46,7 @@ public class MyConfig {
     private MyConfig() {}
 
     @Annotation.Comment("The log level.")
-    public String logLevel = LogLevel.INFO;
+    public LogLevel logLevel = LogLevel.INFO;
 
     public static enum LogLevel {
         DEBUG,
